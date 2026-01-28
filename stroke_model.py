@@ -5,7 +5,7 @@ import os
 from catboost import CatBoostRegressor
 
 
-BASE_DIR = "traindata"
+BASE_DIR = "data/train"
 if not os.path.exists(BASE_DIR):
     raise FileNotFoundError(f"训练数据目录 {BASE_DIR} 不存在，请检查路径。")
 PREV_WINDOW_NUM = 3
@@ -221,27 +221,19 @@ def evaluate(train_val_data, test_data, catboost_regressor):
 
 
 def main():
-    # # 多视角代码（注释掉）
-    # train_val_data = pd.concat([
-    #     load_data([os.path.join(BASE_DIR, dirname) for dirname in ["20241120_132001"]], "left"),
-    #     load_data([os.path.join(BASE_DIR, dirname) for dirname in ["20241120_132001"]], "right"),
-    # ]).sample(frac=1).reset_index(drop=True)
-    #
-    # test_data = pd.concat([
-    #     load_data([os.path.join(BASE_DIR, dirname) for dirname in ["20241121_184001"]], "left"),
-    #     load_data([os.path.join(BASE_DIR, dirname) for dirname in ["20241121_184001"]], "right"),
-    # ]).sample(frac=1).reset_index(drop=True)
-
-    # 单视角代码（新添加）
-    train_val_data = load_data([os.path.join(BASE_DIR, "20241120_132001")], single_view=True)
-    test_data = load_data([os.path.join(BASE_DIR, "20241121_184001")], single_view=True)
+    # 获取所有match目录
+    match_dirs = [os.path.join(BASE_DIR, d) for d in os.listdir(BASE_DIR) if os.path.isdir(os.path.join(BASE_DIR, d)) and d.startswith("match")]
+    
+    # 加载所有match数据
+    train_data = load_data(match_dirs, single_view=True)
+    
 
     # Split into train and test sets
-    # train_data = pd.concat([train_val_data, test_data], ignore_index=True)
-    # train_data = train_data.sample(frac=1).reset_index(drop=True)
-    # split_ratio = 0.6
-    # train_val_data = train_data[:int(len(train_data)*split_ratio)]
-    # test_data = train_data[int(len(train_data)*split_ratio):]
+    train_data = train_data.sample(frac=1).reset_index(drop=True)
+    split_ratio = 0.6
+    train_val_data = train_data[:int(len(train_data)*split_ratio)]
+    test_data = train_data[int(len(train_data)*split_ratio):]
+
     catboost_regressor = train(train_val_data, test_data)
     catboost_regressor.save_model("stroke_model.cbm")
     evaluate(train_val_data, test_data, catboost_regressor)
@@ -276,7 +268,7 @@ def predict():
     #     load_data([os.path.join(BASE_DIR, dirname) for dirname in ["20241121_184001"]], "right"),
     # ]).sample(frac=1).reset_index(drop=True)
     # 单视角代码（新添加）
-    test_data = load_data([os.path.join(BASE_DIR, "20241121_184001")], single_view=True)
+    test_data = load_data([os.path.join(BASE_DIR, "match2")], single_view=True)
     test_data["pred"] = catboost_regressor.predict(test_data[get_feature_cols(PREV_WINDOW_NUM, AFTER_WINDOW_NUM)])
     test_data[["timestamp", "pred", "event_cls", "x", "y"]].to_csv("predict.csv", index=False)
 
