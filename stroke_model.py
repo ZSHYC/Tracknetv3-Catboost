@@ -93,7 +93,8 @@ def __convert_to_dataframe(data, labels_data=[]):
                 "x": x,
                 "y": y,
                 "event_cls": label,
-                "coord": 0  # inserted
+                "coord": 0,  # inserted
+                "video_file": item.get("video_file", "")
             })
         else:
             y = item["pos"]["y"]
@@ -104,7 +105,8 @@ def __convert_to_dataframe(data, labels_data=[]):
                 "x": item["pos"]["x"],
                 "y": item["pos"]["y"],
                 "event_cls": label,
-                "coord": 1  # real
+                "coord": 1,  # real
+                "video_file": item.get("video_file", "")
             })
     if len(pd_data) > 0:
         pd_data = pd.DataFrame.from_dict(pd_data)
@@ -136,6 +138,8 @@ def load_data(directories, tag="left", single_view=False):   # 是否是单视�
             track_data = sorted(track_data, key=lambda x: x["timestamp"])
             tmp = __convert_to_dataframe(track_data)
             if len(tmp) > 0:
+                video_file = tmp["video_file"].iloc[0] if len(tmp) > 0 and "video_file" in tmp.columns else ""
+                tmp["source_video"] = os.path.join(directory, "video", video_file).replace("\\", "/")  # 统一路径分隔符
                 resdf = pd.concat([resdf, to_features(tmp)], ignore_index=True)
     resdf = resdf.sample(frac=1, random_state=42).reset_index(drop=True)
     return resdf
@@ -182,7 +186,7 @@ def evaluate(train_data, test_data, catboost_regressor):
         positive_timestamps = list(val[val['event_cls'] == 1]["timestamp"])
         val["timestamp"]= val["timestamp"].astype(np.int64)
         if threshold == 0.4:
-            val.to_csv("val_0.4.csv", index=False)
+            val[["timestamp", "pred", "event_cls", "x", "y", "source_video"]].to_csv("val_0.4.csv", index=False)
         tp = 0
         tn = 0
         fp = 0
@@ -271,14 +275,15 @@ def predict():
     #     load_data([os.path.join(TRAIN_DIR, dirname) for dirname in ["20241121_184001"]], "left"),
     #     load_data([os.path.join(TRAIN_DIR, dirname) for dirname in ["20241121_184001"]], "right"),
     # ]).sample(frac=1).reset_index(drop=True)
-    # 单视角代码（新添加）
-    test_data = load_data([os.path.join(TEST_DIR, "match2")], single_view=True)
+    # 单视角代码（修改为使用所有测试目录）
+    test_dirs = [os.path.join(TEST_DIR, d) for d in os.listdir(TEST_DIR) if os.path.isdir(os.path.join(TEST_DIR, d)) and d.startswith("match")]
+    test_data = load_data(test_dirs, single_view=True)
     test_data["pred"] = catboost_regressor.predict(test_data[get_feature_cols(PREV_WINDOW_NUM, AFTER_WINDOW_NUM)])
-    test_data[["timestamp", "pred", "event_cls", "x", "y"]].to_csv("predict.csv", index=False)
+    test_data[["timestamp", "pred", "event_cls", "x", "y", "source_video"]].to_csv("predict.csv", index=False)
     
     # 保存预测的落点数据（pred > 0.4的点）
     threshold = 0.4
-    predicted_bounces = test_data[test_data["pred"] > threshold][["timestamp", "x", "y", "pred"]]
+    predicted_bounces = test_data[test_data["pred"] > threshold][["timestamp", "x", "y", "pred", "source_video"]]
     predicted_bounces.to_csv("predicted_bounces.csv", index=False)
     print(f"保存了 {len(predicted_bounces)} 个预测落点到 predicted_bounces.csv")
 

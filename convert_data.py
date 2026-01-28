@@ -78,11 +78,13 @@ def batch_convert(base_dir='data/test'):
                     timestamp = int(frame / fps * 1000)
                     x, y = float(row['X']), float(row['Y'])
                     event_cls = int(1 if frame in events and events[frame]['event_type'] == 'landing' else 0)
+                    video_file = labels_file.replace('_labels.json', '.mp4')
                     data = {
                         "timestamp": timestamp,
                         "pos": {"x": x, "y": y},
                         "event_cls": event_cls,
-                        "track_id": track_id
+                        "track_id": track_id,
+                        "video_file": video_file
                     }
                     out_f.write(json.dumps(data) + '\n')
                 

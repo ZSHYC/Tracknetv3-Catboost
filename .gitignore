@@ -2,3 +2,4 @@ data/
 catboost_info/
 *.cbm
 *.mp4
+*.csv
