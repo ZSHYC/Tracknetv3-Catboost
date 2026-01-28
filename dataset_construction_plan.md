@@ -4,7 +4,7 @@
 构建一个包含**视觉信息（图像序列）**和**几何信息（轨迹序列）**的多模态数据集。该数据集专门用于训练“后处理精修模型”，目的是区分**真实落点**与**高风险误报（如击球点、贴地飞行）**。
 
 ## 2. 数据来源
-*   **输入目录**: `data/train/` 下的所有 match 文件夹。
+*   **输入目录**: `data/train/` 和 `data/test/` 下的所有 match 文件夹。
 *   **依赖文件**:
     *   `bounce_train.json`: 提供轨迹坐标 `(x, y)` 和基础标签 `event_cls`。
     *   `labels/*_labels.json`: 提供精确的 `fps` 信息，用于帧对齐。
@@ -40,8 +40,8 @@
 *   **输入**: 11帧的坐标信息。
 *   **处理**:
     1.  归一化坐标: $x_{norm} = x / 1280, y_{norm} = y / 720$。
-    2.  提取特征向量: `[x_norm, y_norm, visibility]`。
-*   **输出维度**: `(11, 3)` (BiLSTM 可以自动学习后续的速度和加速度特征)。
+    2.  提取特征向量: `[x, y, dx, dy, ddx, ddy, visibility, pred_score]` (包含位置、速度、加速度、可见性、第一阶段分数)。
+*   **输出维度**: `(11, 8)`。
 
 ## 5. 存储格式 (Storage)
 为了提高 I/O 效率，按 **Match**粒度 保存为 `.npz` 压缩文件。
@@ -49,7 +49,7 @@
 *   **路径**: `dataset_v2/train/match_{id}.npz`
 *   **Key-Value**:
     *   `"images"`: `uint8` 数组, shape `(N, 11, 96, 96, 3)`
-    *   `"geo_vectors"`: `float32` 数组, shape `(N, 11, 3)`
+    *   `"geo_vectors"`: `float32` 数组, shape `(N, 11, 8)`
     *   `"labels"`: `uint8` 数组, shape `(N, 1)`
     *   `"infos"`: 字符串数组, 记录来源 `[video_name, timestamp, type]` (用于调试)
 

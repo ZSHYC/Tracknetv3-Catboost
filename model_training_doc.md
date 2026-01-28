@@ -16,8 +16,8 @@
 *   **输出**: $B \times 11 \times 512$
 
 ### 2.2 几何流 (Geometric Stream - MLP)
-*   **输入**: $B \times 11 \times 3$ (包含 x, y, visibility)
-*   **处理**: 通过简单的 MLP (Linear(3->64) -> ReLU)。
+*   **输入**: $B \times 11 \times 8$ (包含 x, y, dx, dy, ddx, ddy, visibility, pred)
+*   **处理**: 通过简单的 MLP (Linear(8->64) -> ReLU)。
 *   **输出**: $B \times 11 \times 64$
 
 ### 2.3 融合与时序建模 (Fusion & Temporal)
@@ -37,12 +37,12 @@
 ## 3. 训练策略
 
 *   **数据增强 (Data Augmentation)**:
-    *   **几何**: 随机对图像进行水平翻转 (Horizontal Flip)，同时翻转 x 坐标。
-    *   **颜色**: 随机微调亮度/对比度，防止过拟合。
+    *   目前实现为简单的归一化处理。如有需要，可在后续迭代中加入几何翻转或颜色抖动。
 *   **损失函数 (Loss)**: `BCEWithLogitsLoss` (二元交叉熵)。
 *   **优化器**: `Adam` (Learning Rate = 1e-4)。
-*   **早停机制 (Early Stopping)**: 监控验证集 Loss，如果 5 个 Epoch 不下降则停止。
-*   **正负样本平衡**: 我们的数据集中负样本可能较多，可以在 Loss 中设置 `pos_weight` 来增加正样本的权重。
+*   **早停机制 (Early Stopping)**: 监控验证集 Loss/F1，如果多次不提升则停止。
+*   **阈值自动搜索**: 在验证阶段，脚本会自动在 [0.05, 0.95] 范围内搜索产生最高 F1 Score 的最佳分类阈值。
+*   **正负样本自动加权**: 代码会自动统计训练集中的正负样本比例，并根据公式 `pos_weight = neg_count / pos_count * 2.0` 动态计算 Loss 权重，以解决样本不平衡问题。
 
 ## 4. 目录结构
 *   `dataset_v2/train/`: 存放 NPZ 训练数据

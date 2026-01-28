@@ -178,6 +178,9 @@ def main():
         if val_metrics['f1'] > best_f1:
             best_f1 = val_metrics['f1']
             torch.save(model.state_dict(), os.path.join(save_dir, "best_refiner.pth"))
+            threshold_path = os.path.join(save_dir, "best_refiner_threshold.txt")
+            with open(threshold_path, "w", encoding="utf-8") as f:
+                f.write(str(val_metrics['threshold']))
             print(">>> Best Model Saved!")
 
 if __name__ == "__main__":

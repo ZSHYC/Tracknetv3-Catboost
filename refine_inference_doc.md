@@ -27,8 +27,10 @@
 
 ## 4. 使用命令
 ```powershell
-python predict_refiner.py --input predict.csv --model checkpoints/best_refiner.pth --output refined_bounces.csv --threshold 0.95
+python predict_refiner.py --input predict.csv --model checkpoints/best_refiner.pth --output refined_bounces.csv --threshold 0.85
 ```
+
+*注意：`threshold` 参数对于最终的精确度至关重要。建议查看训练日志中输出的 `Best Threshold` 值，并在推理时使用该值。*
 
 如果你希望只精修 `predicted_bounces.csv` 中的候选点：
 ```powershell

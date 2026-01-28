@@ -59,7 +59,7 @@ def get_roi(frame, x, y, size):
     return roi
 
 
-def build_sequence(video_df, frame_to_row, cap, center_frame_idx, fallback_row):
+def build_sequence_from_cache(frame_to_row, frames_cache, center_frame_idx, fallback_row):
     start_frame = center_frame_idx - HALF_WIN
 
     seq_images = []
@@ -67,8 +67,7 @@ def build_sequence(video_df, frame_to_row, cap, center_frame_idx, fallback_row):
 
     for k in range(WINDOW_SIZE):
         current_f_idx = start_frame + k
-        cap.set(cv2.CAP_PROP_POS_FRAMES, current_f_idx)
-        ret, frame = cap.read()
+        frame = frames_cache.get(current_f_idx, None)
 
         current_x, current_y = 0.0, 0.0
         visibility = 0
@@ -98,7 +97,7 @@ def build_sequence(video_df, frame_to_row, cap, center_frame_idx, fallback_row):
                 visibility = 0
                 pred_score = fallback_row.get('pred', 0.0)
 
-        if not ret:
+        if frame is None:
             img_roi = np.zeros((ROI_SIZE, ROI_SIZE, 3), dtype=np.uint8)
         else:
             img_roi = get_roi(frame, current_x, current_y, ROI_SIZE)
@@ -141,6 +140,139 @@ def build_sequence(video_df, frame_to_row, cap, center_frame_idx, fallback_row):
     return images_stack, vectors_stack
 
 
+def build_frame_cache(video_path, required_frames):
+    frames_cache = {}
+    if not required_frames:
+        return frames_cache
+
+    max_frame = max(required_frames)
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        return frames_cache
+
+    frame_idx = 0
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+        if frame_idx in required_frames:
+            frames_cache[frame_idx] = frame
+        if frame_idx > max_frame:
+            break
+        frame_idx += 1
+
+    cap.release()
+    return frames_cache
+
+
+def run_refiner(input_path, candidates_path, model_path, output_path, threshold, candidate_threshold):
+    if not os.path.exists(input_path):
+        print(f"Input file not found: {input_path}")
+        return 0
+    if not os.path.exists(model_path):
+        print(f"Model not found: {model_path}")
+        return 0
+
+    df = pd.read_csv(input_path)
+    if candidates_path and os.path.exists(candidates_path):
+        cand_df = pd.read_csv(candidates_path)
+        df = df.merge(cand_df[['timestamp', 'source_video']], on=['timestamp', 'source_video'], how='inner')
+        print(f"Using candidates file: {candidates_path}, candidates={len(df)}")
+    else:
+        if 'pred' in df.columns:
+            before = len(df)
+            df = df[df['pred'] >= candidate_threshold].copy()
+            print(f"Filtered candidates by pred >= {candidate_threshold}: {before} -> {len(df)}")
+
+    if len(df) == 0:
+        print("No candidates found.")
+        return 0
+
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    model = STFNet().to(device)
+    model.load_state_dict(torch.load(model_path, map_location=device))
+    model.eval()
+
+    results = []
+
+    for video_path, group in df.groupby('source_video'):
+        video_path = video_path.replace('\\', '/')
+        if not os.path.exists(video_path):
+            print(f"Video not found: {video_path}")
+            continue
+
+        parts = video_path.split('/')
+        match_dir = '/'.join(parts[:-2])
+        video_file = parts[-1]
+        fps = load_fps_for_video(match_dir, video_file)
+
+        video_df = df[df['source_video'] == video_path].copy()
+        video_df['frame_idx'] = (video_df['timestamp'] * fps / 1000.0).round().astype(int)
+        frame_to_row = video_df.drop_duplicates('frame_idx').set_index('frame_idx').to_dict('index')
+
+        total_candidates = len(group)
+        print(f"Processing {video_path} | candidates: {total_candidates}")
+
+        required_frames = set()
+        for _, row in group.iterrows():
+            center_frame_idx = round(row['timestamp'] * fps / 1000)
+            for f in range(center_frame_idx - HALF_WIN, center_frame_idx + HALF_WIN + 1):
+                if f >= 0:
+                    required_frames.add(f)
+
+        frames_cache = build_frame_cache(video_path, required_frames)
+
+        batch_images = []
+        batch_vectors = []
+        batch_meta = []
+
+        for i, (_, row) in enumerate(group.iterrows(), start=1):
+            center_frame_idx = round(row['timestamp'] * fps / 1000)
+            images_stack, vectors_stack = build_sequence_from_cache(
+                frame_to_row, frames_cache, center_frame_idx, row
+            )
+            batch_images.append(images_stack)
+            batch_vectors.append(vectors_stack)
+            batch_meta.append(row)
+
+            if i % 200 == 0:
+                print(f"  progress: {i}/{total_candidates}")
+
+            if len(batch_images) >= 16:
+                preds = run_batch(model, batch_images, batch_vectors, device)
+                for pred, meta in zip(preds, batch_meta):
+                    if pred >= threshold:
+                        results.append({
+                            'timestamp': meta['timestamp'],
+                            'x': meta['x'],
+                            'y': meta['y'],
+                            'pred': pred,
+                            'source_video': meta['source_video']
+                        })
+                batch_images, batch_vectors, batch_meta = [], [], []
+
+        if batch_images:
+            preds = run_batch(model, batch_images, batch_vectors, device)
+            for pred, meta in zip(preds, batch_meta):
+                if pred >= threshold:
+                    results.append({
+                        'timestamp': meta['timestamp'],
+                        'x': meta['x'],
+                        'y': meta['y'],
+                        'pred': pred,
+                        'source_video': meta['source_video']
+                    })
+
+    if results:
+        out_df = pd.DataFrame(results)
+        out_df.to_csv(output_path, index=False)
+        print(f"Saved refined results: {output_path}, count={len(out_df)}")
+        return len(out_df)
+    else:
+        print("No refined results above threshold.")
+        return 0
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--input', type=str, default='predict.csv', help='predict.csv path')
@@ -151,110 +283,14 @@ def main():
     parser.add_argument('--candidate-threshold', type=float, default=0.4, help='candidate filter on predict.csv pred when no candidates file')
     args = parser.parse_args()
 
-    if not os.path.exists(args.input):
-        print(f"Input file not found: {args.input}")
-        return
-    if not os.path.exists(args.model):
-        print(f"Model not found: {args.model}")
-        return
-
-    df = pd.read_csv(args.input)
-    if args.candidates and os.path.exists(args.candidates):
-        cand_df = pd.read_csv(args.candidates)
-        df = df.merge(cand_df[['timestamp', 'source_video']], on=['timestamp', 'source_video'], how='inner')
-        print(f"Using candidates file: {args.candidates}, candidates={len(df)}")
-    else:
-        # 如果没有提供 candidates，则按预测分数过滤候选
-        if 'pred' in df.columns:
-            before = len(df)
-            df = df[df['pred'] >= args.candidate_threshold].copy()
-            print(f"Filtered candidates by pred >= {args.candidate_threshold}: {before} -> {len(df)}")
-
-    if len(df) == 0:
-        print("No candidates found.")
-        return
-
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    model = STFNet().to(device)
-    model.load_state_dict(torch.load(args.model, map_location=device))
-    model.eval()
-
-    results = []
-
-    # 按视频分组推理
-    for video_path, group in df.groupby('source_video'):
-        # source_video: data/test/matchX/video/xxx.mp4
-        video_path = video_path.replace('\\', '/')
-        if not os.path.exists(video_path):
-            print(f"Video not found: {video_path}")
-            continue
-
-        # 推断 match_dir
-        # data/test/matchX/video/xxx.mp4
-        parts = video_path.split('/')
-        match_dir = '/'.join(parts[:-2])
-        video_file = parts[-1]
-
-        fps = load_fps_for_video(match_dir, video_file)
-
-        video_df = df[df['source_video'] == video_path].copy()
-        video_df['frame_idx'] = (video_df['timestamp'] * fps / 1000.0).round().astype(int)
-        frame_to_row = video_df.drop_duplicates('frame_idx').set_index('frame_idx').to_dict('index')
-
-        cap = cv2.VideoCapture(video_path)
-
-        total_candidates = len(group)
-        print(f"Processing {video_path} | candidates: {total_candidates}")
-
-        batch_images = []
-        batch_vectors = []
-        batch_meta = []
-
-        for i, (_, row) in enumerate(group.iterrows(), start=1):
-            center_frame_idx = round(row['timestamp'] * fps / 1000)
-            images_stack, vectors_stack = build_sequence(video_df, frame_to_row, cap, center_frame_idx, row)
-            batch_images.append(images_stack)
-            batch_vectors.append(vectors_stack)
-            batch_meta.append(row)
-
-            if i % 200 == 0:
-                print(f"  progress: {i}/{total_candidates}")
-
-            # 简单batch推理
-            if len(batch_images) >= 16:
-                preds = run_batch(model, batch_images, batch_vectors, device)
-                for pred, meta in zip(preds, batch_meta):
-                    if pred >= args.threshold:
-                        results.append({
-                            'timestamp': meta['timestamp'],
-                            'x': meta['x'],
-                            'y': meta['y'],
-                            'pred': pred,
-                            'source_video': meta['source_video']
-                        })
-                batch_images, batch_vectors, batch_meta = [], [], []
-
-        # flush remaining
-        if batch_images:
-            preds = run_batch(model, batch_images, batch_vectors, device)
-            for pred, meta in zip(preds, batch_meta):
-                if pred >= args.threshold:
-                    results.append({
-                        'timestamp': meta['timestamp'],
-                        'x': meta['x'],
-                        'y': meta['y'],
-                        'pred': pred,
-                        'source_video': meta['source_video']
-                    })
-
-        cap.release()
-
-    if results:
-        out_df = pd.DataFrame(results)
-        out_df.to_csv(args.output, index=False)
-        print(f"Saved refined results: {args.output}, count={len(out_df)}")
-    else:
-        print("No refined results above threshold.")
+    run_refiner(
+        input_path=args.input,
+        candidates_path=args.candidates,
+        model_path=args.model,
+        output_path=args.output,
+        threshold=args.threshold,
+        candidate_threshold=args.candidate_threshold
+    )
 
 
 def run_batch(model, batch_images, batch_vectors, device):
