@@ -107,13 +107,21 @@ def __convert_to_dataframe(data, labels_data=[]):
         pd_data = __add_weight(pd_data, {1: 20, 0: 1})
     return pd_data
 
-def load_data(directories, tag="left"):
+def load_data(directories, tag="left", single_view=False):   # 是否是单视角，如果以后有多视角，设single_view=False并取消注释。
     for directory in directories:
         if not os.path.exists(directory):
             raise FileNotFoundError(f"目录 {directory} 不存在。")
     resdf = pd.DataFrame()
     for directory in directories:
-        datalist = [json.loads(line.strip()) for line in  open(os.path.join(directory, f"{tag}_bounce_train.json"), "r").readlines()]
+        if single_view:
+            # 单视角：加载 bounce_train.json
+            file_path = os.path.join(directory, "bounce_train.json")
+        else:
+            # 多视角：加载 {tag}_bounce_train.json
+            file_path = os.path.join(directory, f"{tag}_bounce_train.json")
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(f"文件 {file_path} 不存在。")
+        datalist = [json.loads(line.strip()) for line in open(file_path, "r").readlines()]
         tracks_data = {}
         for item in datalist:
             track_id = item["track_id"]
@@ -213,16 +221,20 @@ def evaluate(train_val_data, test_data, catboost_regressor):
 
 
 def main():
-    # train_data = load_data([os.path.join(BASE_DIR, dirname) for dirname in dirnames], "left")
-    train_val_data = pd.concat([
-        load_data([os.path.join(BASE_DIR, dirname) for dirname in ["20241120_132001"]], "left"),
-        load_data([os.path.join(BASE_DIR, dirname) for dirname in ["20241120_132001"]], "right"),
-    ]).sample(frac=1).reset_index(drop=True)
+    # # 多视角代码（注释掉）
+    # train_val_data = pd.concat([
+    #     load_data([os.path.join(BASE_DIR, dirname) for dirname in ["20241120_132001"]], "left"),
+    #     load_data([os.path.join(BASE_DIR, dirname) for dirname in ["20241120_132001"]], "right"),
+    # ]).sample(frac=1).reset_index(drop=True)
+    #
+    # test_data = pd.concat([
+    #     load_data([os.path.join(BASE_DIR, dirname) for dirname in ["20241121_184001"]], "left"),
+    #     load_data([os.path.join(BASE_DIR, dirname) for dirname in ["20241121_184001"]], "right"),
+    # ]).sample(frac=1).reset_index(drop=True)
 
-    test_data = pd.concat([
-        load_data([os.path.join(BASE_DIR, dirname) for dirname in ["20241121_184001"]], "left"),
-        load_data([os.path.join(BASE_DIR, dirname) for dirname in ["20241121_184001"]], "right"),
-    ]).sample(frac=1).reset_index(drop=True)
+    # 单视角代码（新添加）
+    train_val_data = load_data([os.path.join(BASE_DIR, "20241120_132001")], single_view=True)
+    test_data = load_data([os.path.join(BASE_DIR, "20241121_184001")], single_view=True)
 
     # Split into train and test sets
     # train_data = pd.concat([train_val_data, test_data], ignore_index=True)
@@ -258,10 +270,13 @@ def predict():
         raise FileNotFoundError(f"模型文件 {model_path} 不存在。")
     catboost_regressor = CatBoostRegressor()
     catboost_regressor.load_model(model_path)
-    test_data = pd.concat([
-        load_data([os.path.join(BASE_DIR, dirname) for dirname in ["20241121_184001"]], "left"),
-        load_data([os.path.join(BASE_DIR, dirname) for dirname in ["20241121_184001"]], "right"),
-    ]).sample(frac=1).reset_index(drop=True)
+    # # 多视角代码（注释掉）
+    # test_data = pd.concat([
+    #     load_data([os.path.join(BASE_DIR, dirname) for dirname in ["20241121_184001"]], "left"),
+    #     load_data([os.path.join(BASE_DIR, dirname) for dirname in ["20241121_184001"]], "right"),
+    # ]).sample(frac=1).reset_index(drop=True)
+    # 单视角代码（新添加）
+    test_data = load_data([os.path.join(BASE_DIR, "20241121_184001")], single_view=True)
     test_data["pred"] = catboost_regressor.predict(test_data[get_feature_cols(PREV_WINDOW_NUM, AFTER_WINDOW_NUM)])
     test_data[["timestamp", "pred", "event_cls", "x", "y"]].to_csv("predict.csv", index=False)
 
