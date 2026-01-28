@@ -5,9 +5,14 @@ import os
 from catboost import CatBoostRegressor
 
 
-BASE_DIR = "data/train"
-if not os.path.exists(BASE_DIR):
-    raise FileNotFoundError(f"训练数据目录 {BASE_DIR} 不存在，请检查路径。")
+TRAIN_DIR = "data/train"
+if not os.path.exists(TRAIN_DIR):
+    raise FileNotFoundError(f"训练数据目录 {TRAIN_DIR} 不存在，请检查路径。")
+
+TEST_DIR = "data/test"
+if not os.path.exists(TEST_DIR):
+    raise FileNotFoundError(f"测试数据目录 {TEST_DIR} 不存在，请检查路径。")
+
 PREV_WINDOW_NUM = 3
 AFTER_WINDOW_NUM = 3
 
@@ -45,6 +50,8 @@ def to_features(data, prev_window_num=PREV_WINDOW_NUM, after_window_num=AFTER_WI
         data.loc[:, 'y_div_{}'.format(i)] = data['y_diff_{}'.format(i)]/(data['y_diff_inv_{}'.format(i)] + eps)
 
     
+
+
 
     for i in range(1, prev_window_num):
         data = data[data['x_lag_{}'.format(i)].notna()]
@@ -133,7 +140,7 @@ def load_data(directories, tag="left", single_view=False):   # 是否是单视�
             tmp = __convert_to_dataframe(track_data)
             if len(tmp) > 0:
                 resdf = pd.concat([resdf, to_features(tmp)], ignore_index=True)
-    resdf = resdf.sample(frac=1).reset_index(drop=True)
+    resdf = resdf.sample(frac=1, random_state=42).reset_index(drop=True)
     return resdf
 
 def find_nearest_timestamp(timestamp, timestamps):
@@ -150,18 +157,18 @@ def find_nearest_timestamp(timestamp, timestamps):
 
 
 
-def train(train_val_data, test_data):
+def train(train_data, test_data):
     catboost_regressor = CatBoostRegressor(iterations=3000, depth=3, learning_rate=0.1, loss_function='RMSE')
-    catboost_regressor.fit(train_val_data[get_feature_cols(PREV_WINDOW_NUM, AFTER_WINDOW_NUM)], train_val_data['event_cls'],
+    catboost_regressor.fit(train_data[get_feature_cols(PREV_WINDOW_NUM, AFTER_WINDOW_NUM)], train_data['event_cls'],
                         eval_set=(test_data[get_feature_cols(PREV_WINDOW_NUM, AFTER_WINDOW_NUM)], test_data['event_cls']),
-                        use_best_model=True, sample_weight=train_val_data['weight'],
-                        #    early_stopping_rounds=100,
+                        use_best_model=True, sample_weight=train_data['weight'],
+                        # early_stopping_rounds=100,
                         )
 
     return catboost_regressor
 
 
-def evaluate(train_val_data, test_data, catboost_regressor):
+def evaluate(train_data, test_data, catboost_regressor):
     test_data["pred"] = catboost_regressor.predict(test_data[get_feature_cols(PREV_WINDOW_NUM, AFTER_WINDOW_NUM)])
     output_cols = ["timestamp", "pred", "event_cls", "x", "y"]
     import numpy as np
@@ -172,7 +179,7 @@ def evaluate(train_val_data, test_data, catboost_regressor):
         val = test_data
 
         all_positive_timestamps = list(val[val['event_cls'] == 1]["timestamp"])
-        all_positive_timestamps += list(train_val_data[train_val_data['event_cls'] == 1]["timestamp"])
+        all_positive_timestamps += list(train_data[train_data['event_cls'] == 1]["timestamp"])
         positive_timestamps = list(val[val['event_cls'] == 1]["timestamp"])
         val["timestamp"]= val["timestamp"].astype(np.int64)
         if threshold == 0.4:
@@ -221,22 +228,20 @@ def evaluate(train_val_data, test_data, catboost_regressor):
 
 
 def main():
-    # 获取所有match目录
-    match_dirs = [os.path.join(BASE_DIR, d) for d in os.listdir(BASE_DIR) if os.path.isdir(os.path.join(BASE_DIR, d)) and d.startswith("match")]
+    # 获取训练和测试目录
+    train_dirs = [os.path.join(TRAIN_DIR, d) for d in os.listdir(TRAIN_DIR) if os.path.isdir(os.path.join(TRAIN_DIR, d)) and d.startswith("match")]
+    test_dirs = [os.path.join(TEST_DIR, d) for d in os.listdir(TEST_DIR) if os.path.isdir(os.path.join(TEST_DIR, d)) and d.startswith("match")]
     
-    # 加载所有match数据
-    train_data = load_data(match_dirs, single_view=True)
+    # 加载训练和测试数据
+    train_data = load_data(train_dirs, single_view=True)
+    test_data = load_data(test_dirs, single_view=True)
     
+    print(f"Train data shape: {train_data.shape}, positive samples: {len(train_data[train_data['event_cls'] == 1])}")
+    print(f"Test data shape: {test_data.shape}, positive samples: {len(test_data[test_data['event_cls'] == 1])}")
 
-    # Split into train and test sets
-    train_data = train_data.sample(frac=1).reset_index(drop=True)
-    split_ratio = 0.6
-    train_val_data = train_data[:int(len(train_data)*split_ratio)]
-    test_data = train_data[int(len(train_data)*split_ratio):]
-
-    catboost_regressor = train(train_val_data, test_data)
+    catboost_regressor = train(train_data, test_data)
     catboost_regressor.save_model("stroke_model.cbm")
-    evaluate(train_val_data, test_data, catboost_regressor)
+    evaluate(train_data, test_data, catboost_regressor)
 
 def points_to_features(points):
     points = pd.DataFrame(points, columns=["x", "y"])
@@ -264,11 +269,11 @@ def predict():
     catboost_regressor.load_model(model_path)
     # # 多视角代码（注释掉）
     # test_data = pd.concat([
-    #     load_data([os.path.join(BASE_DIR, dirname) for dirname in ["20241121_184001"]], "left"),
-    #     load_data([os.path.join(BASE_DIR, dirname) for dirname in ["20241121_184001"]], "right"),
+    #     load_data([os.path.join(TRAIN_DIR, dirname) for dirname in ["20241121_184001"]], "left"),
+    #     load_data([os.path.join(TRAIN_DIR, dirname) for dirname in ["20241121_184001"]], "right"),
     # ]).sample(frac=1).reset_index(drop=True)
     # 单视角代码（新添加）
-    test_data = load_data([os.path.join(BASE_DIR, "match2")], single_view=True)
+    test_data = load_data([os.path.join(TEST_DIR, "match2")], single_view=True)
     test_data["pred"] = catboost_regressor.predict(test_data[get_feature_cols(PREV_WINDOW_NUM, AFTER_WINDOW_NUM)])
     test_data[["timestamp", "pred", "event_cls", "x", "y"]].to_csv("predict.csv", index=False)
 

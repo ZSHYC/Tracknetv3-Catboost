@@ -29,7 +29,7 @@ def convert_to_json_lines(csv_path, labels_path, output_path, track_id=1):
             }
             f.write(json.dumps(data) + '\n')
 
-def batch_convert(base_dir='data/train'):
+def batch_convert(base_dir='data/test'):
     if not os.path.exists(base_dir):
         raise FileNotFoundError(f"目录 {base_dir} 不存在。")
     
@@ -51,24 +51,25 @@ def batch_convert(base_dir='data/train'):
         
         with open(output_path, 'w') as out_f:
             track_id = 1
-            for csv_file in csv_files:
-                # 匹配labels文件：1_01_00_ball.csv -> 1_01_00_labels.json
-                base_name = csv_file.replace('_ball.csv', '')
-                labels_file = base_name + '_labels.json'
+            for labels_file in labels_files:
+                # 从labels的metadata获取csv_path
+                labels_path_full = os.path.join(labels_dir, labels_file)
+                with open(labels_path_full, 'r') as f:
+                    labels = json.load(f)
+                csv_path_relative = labels['metadata']['csv_path']
+                # 提取csv文件名，如1_02_00_ball.csv
+                csv_file = os.path.basename(csv_path_relative)
                 
-                if labels_file not in labels_files:
-                    print(f"跳过 {match_dir}/{csv_file}：无匹配labels文件。")
+                if csv_file not in csv_files:
+                    print(f"跳过 {match_dir}/{labels_file}：无匹配csv文件 {csv_file}。")
                     continue
                 
                 csv_path = os.path.join(csv_dir, csv_file)
-                labels_path = os.path.join(labels_dir, labels_file)
                 
                 # 读取并写入
                 df = pd.read_csv(csv_path)
                 df = df[df['Visibility'] == 1]
                 
-                with open(labels_path, 'r') as f:
-                    labels = json.load(f)
                 fps = labels['metadata']['fps']
                 events = {event['frame']: event for event in labels['events']}
                 
@@ -90,4 +91,5 @@ def batch_convert(base_dir='data/train'):
         print(f"转换完成：{match_dir} -> {output_path}")
 
 # 批量转换
-batch_convert()
+batch_convert('data/train')
+batch_convert('data/test')
