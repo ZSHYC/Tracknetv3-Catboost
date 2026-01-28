@@ -6,6 +6,8 @@ from catboost import CatBoostRegressor
 
 
 BASE_DIR = "traindata"
+if not os.path.exists(BASE_DIR):
+    raise FileNotFoundError(f"训练数据目录 {BASE_DIR} 不存在，请检查路径。")
 PREV_WINDOW_NUM = 3
 AFTER_WINDOW_NUM = 3
 
@@ -106,6 +108,9 @@ def __convert_to_dataframe(data, labels_data=[]):
     return pd_data
 
 def load_data(directories, tag="left"):
+    for directory in directories:
+        if not os.path.exists(directory):
+            raise FileNotFoundError(f"目录 {directory} 不存在。")
     resdf = pd.DataFrame()
     for directory in directories:
         datalist = [json.loads(line.strip()) for line in  open(os.path.join(directory, f"{tag}_bounce_train.json"), "r").readlines()]
@@ -238,15 +243,21 @@ def points_to_features(points):
     return features[cols].iloc[0].values
 
 def check_model(points):
+    model_path = "../game/stroke_model.cbm"
+    if not os.path.exists(model_path):
+        raise FileNotFoundError(f"模型文件 {model_path} 不存在。")
     catboost_regressor = CatBoostRegressor()
-    catboost_regressor.load_model("../game/stroke_model.cbm")
+    catboost_regressor.load_model(model_path)
     features = points_to_features(points)
     print(catboost_regressor.predict(features))
 
 
 def predict():
+    model_path = "../game/stroke_model.cbm"
+    if not os.path.exists(model_path):
+        raise FileNotFoundError(f"模型文件 {model_path} 不存在。")
     catboost_regressor = CatBoostRegressor()
-    catboost_regressor.load_model("../game/stroke_model.cbm")
+    catboost_regressor.load_model(model_path)
     test_data = pd.concat([
         load_data([os.path.join(BASE_DIR, dirname) for dirname in ["20241121_184001"]], "left"),
         load_data([os.path.join(BASE_DIR, dirname) for dirname in ["20241121_184001"]], "right"),
