@@ -3,3 +3,6 @@ catboost_info/
 *.cbm
 *.mp4
 *.csv
+*.npz
+*.pth
+*.pyc
