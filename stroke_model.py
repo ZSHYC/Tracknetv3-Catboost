@@ -111,7 +111,7 @@ def __convert_to_dataframe(data, labels_data=[]):
             })
     if len(pd_data) > 0:
         pd_data = pd.DataFrame.from_dict(pd_data)
-        pd_data = __add_weight(pd_data, {1: 20, 0: 1})
+        pd_data = __add_weight(pd_data, {1: 400, 0: 1})
     return pd_data
 
 def load_data(directories, tag="left", single_view=False):   # 是否是单视角，如果以后有多视角，设single_view=False并取消注释。
