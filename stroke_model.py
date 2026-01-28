@@ -73,7 +73,7 @@ def __convert_to_dataframe(data, labels_data=[]):
             label = 1
         else:
             label = 0
-        label = max(item.get("label_cls", 0), label)
+        label = max(item.get("event_cls", 0), item.get("label_cls", 0), label)
         if item.get("pos", None) is None:
             next_index = -1
             for i in range(index + 1, index + 5):
@@ -158,6 +158,8 @@ def find_nearest_timestamp(timestamp, timestamps):
 
 
 def train(train_data, test_data):
+    if train_data["event_cls"].nunique() < 2:
+        raise ValueError("训练集中只有单一类别（event_cls 全为同一值）。请检查 bounce_train.json 是否包含正样本，或重新生成标注数据。")
     catboost_regressor = CatBoostRegressor(iterations=3000, depth=3, learning_rate=0.1, loss_function='RMSE')
     catboost_regressor.fit(train_data[get_feature_cols(PREV_WINDOW_NUM, AFTER_WINDOW_NUM)], train_data['event_cls'],
                         eval_set=(test_data[get_feature_cols(PREV_WINDOW_NUM, AFTER_WINDOW_NUM)], test_data['event_cls']),
