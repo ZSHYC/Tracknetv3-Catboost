@@ -49,12 +49,9 @@ def to_features(data, prev_window_num=PREV_WINDOW_NUM, after_window_num=AFTER_WI
         data.loc[:, 'x_div_{}'.format(i)] = data['x_diff_{}'.format(i)]/(data['x_diff_inv_{}'.format(i)] + eps)
         data.loc[:, 'y_div_{}'.format(i)] = data['y_diff_{}'.format(i)]/(data['y_diff_inv_{}'.format(i)] + eps)
 
-    
-
-
-
     for i in range(1, prev_window_num):
         data = data[data['x_lag_{}'.format(i)].notna()]
+        
     for i in range(1, after_window_num):
         data = data[data['x_lag_inv_{}'.format(i)].notna()]
     data = data[data['x'].notna()] 
@@ -254,7 +251,7 @@ def points_to_features(points):
     return features[cols].iloc[0].values
 
 def check_model(points):
-    model_path = "../game/stroke_model.cbm"
+    model_path = "stroke_model.cbm"  # 修正路径：模型在当前目录
     if not os.path.exists(model_path):
         raise FileNotFoundError(f"模型文件 {model_path} 不存在。")
     catboost_regressor = CatBoostRegressor()
@@ -264,7 +261,7 @@ def check_model(points):
 
 
 def predict():
-    model_path = "../game/stroke_model.cbm"
+    model_path = "stroke_model.cbm"  # 修正路径：模型在当前目录
     if not os.path.exists(model_path):
         raise FileNotFoundError(f"模型文件 {model_path} 不存在。")
     catboost_regressor = CatBoostRegressor()
@@ -278,10 +275,17 @@ def predict():
     test_data = load_data([os.path.join(TEST_DIR, "match2")], single_view=True)
     test_data["pred"] = catboost_regressor.predict(test_data[get_feature_cols(PREV_WINDOW_NUM, AFTER_WINDOW_NUM)])
     test_data[["timestamp", "pred", "event_cls", "x", "y"]].to_csv("predict.csv", index=False)
+    
+    # 保存预测的落点数据（pred > 0.4的点）
+    threshold = 0.4
+    predicted_bounces = test_data[test_data["pred"] > threshold][["timestamp", "x", "y", "pred"]]
+    predicted_bounces.to_csv("predicted_bounces.csv", index=False)
+    print(f"保存了 {len(predicted_bounces)} 个预测落点到 predicted_bounces.csv")
 
 
 if __name__ == "__main__":
     main()
+    predict()  # 取消注释来生成预测结果文件
     # check_model([(371.0, 534.3333129882812), (372.3333435058594, 547.6666259765625), (375.33331298828125, 566.3333129882812), (372.3333435058594, 555.0), (370.33331298828125, 543.3333129882812)])
     # predict()
 
